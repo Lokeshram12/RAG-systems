@@ -8,3 +8,5 @@ Stages :
     -Tokenization
     -Stop Words
     -Stemming
+
+2.TF -IDF

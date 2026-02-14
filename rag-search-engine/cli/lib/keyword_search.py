@@ -32,7 +32,6 @@ def preprocess_text(text: str) -> str:
     text = text.translate(str.maketrans("", "", string.punctuation))
     return text
 
-
 def tokenize_text(text: str) -> list[str]:
     text = preprocess_text(text)
     tokens = text.split()
@@ -50,3 +49,4 @@ def tokenize_text(text: str) -> list[str]:
     for word in filtered_words:
         stemmed_words.append(stemmer.stem(word))
     return stemmed_words
+
