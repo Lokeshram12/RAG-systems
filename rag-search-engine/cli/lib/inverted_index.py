@@ -1,7 +1,6 @@
 import os
 import re
 import pickle
-from lib.keyword_search import tokenize_text
 
 class InvertedIndex:
     def __init__(self):
@@ -46,3 +45,19 @@ class InvertedIndex:
 
         with open("cache/docmap.pkl", "wb") as f:
             pickle.dump(self.docmap, f)
+
+    def load(self):
+        index_path = "cache/index.pkl"
+        docmap_path = "cache/docmap.pkl"
+
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"Index file not found at {index_path}")
+
+        if not os.path.exists(docmap_path):
+            raise FileNotFoundError(f"Docmap file not found at {docmap_path}")
+
+        with open(index_path, "rb") as f:
+            self.index = pickle.load(f)
+
+        with open(docmap_path, "rb") as f:
+            self.docmap = pickle.load(f)

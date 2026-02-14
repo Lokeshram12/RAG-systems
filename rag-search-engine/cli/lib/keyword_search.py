@@ -3,18 +3,40 @@ import string
 from nltk.stem import PorterStemmer
 
 from .search_utils import DEFAULT_SEARCH_LIMIT, load_movies, load_stopwords
-
+from .inverted_index import InvertedIndex
 
 def search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> list[dict]:
-    movies = load_movies()
+    idx = InvertedIndex()
+
+    # Try loading the cached index
+    try:
+        idx.load()
+    except FileNotFoundError:
+        print("Error: Inverted index not found. Please run `build` first.")
+        return []
+
     results = []
-    for movie in movies:
-        query_tokens = tokenize_text(query)
-        title_tokens = tokenize_text(movie["title"])
-        if has_matching_token(query_tokens, title_tokens):
-            results.append(movie)
-            if len(results) >= limit:
-                break
+    seen_doc_ids = set()
+
+    query_tokens = tokenize_text(query)
+
+    for token in query_tokens:
+        doc_ids = idx.get_documents(token)
+
+        for doc_id in doc_ids:
+            if doc_id not in seen_doc_ids:
+                seen_doc_ids.add(doc_id)
+                results.append(idx.docmap[doc_id])
+
+                if len(results) >= limit:
+                    break
+
+        if len(results) >= limit:
+            break
+
+    # Print results
+    for movie in results:
+        print(f"{movie['id']} - {movie['title']}")
 
     return results
 

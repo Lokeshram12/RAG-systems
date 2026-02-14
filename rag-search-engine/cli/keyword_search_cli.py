@@ -5,6 +5,7 @@ import argparse
 from lib.keyword_search import search_command
 from lib.inverted_index import InvertedIndex
 from lib.search_utils import load_movies
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -28,11 +29,6 @@ def main() -> None:
             idx = InvertedIndex()
             idx.build(movies)
             idx.save()
-            docs = idx.get_documents("merida")
-            if docs:
-                print(f"First document ID for 'merida': {docs[0]}")
-            else:
-                print("Token 'merida' not found.")
         case _:
             parser.print_help()
 
