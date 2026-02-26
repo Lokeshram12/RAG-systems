@@ -11,6 +11,7 @@ from .search_utils import (
     DEFAULT_SEARCH_LIMIT,
     load_movies,
     load_stopwords,
+    BM25_K1,
 )
 
 
@@ -79,6 +80,34 @@ class InvertedIndex:
         idf = self.get_idf(term)
         return tf * idf
 
+    def get_bm25_idf(self, term: str) -> float:
+        tokens = tokenize_text(term)
+        if len(tokens) != 1:
+            raise ValueError("term must be a single token")
+
+        token = tokens[0]
+
+        N = len(self.docmap)
+        df = len(self.index[token])
+
+        # BM25 IDF formula:
+        # log((N - df + 0.5) / (df + 0.5) + 1)
+        return math.log(((N - df + 0.5) / (df + 0.5)) + 1)
+    
+    def get_bm25_tf(self, doc_id, term, k1=BM25_K1):
+        tf=self.get_tf(doc_id,term)
+        val=(tf * (k1 + 1)) / (tf + k1)
+        return val
+    
+def bm25_idf_command(term: str) -> float:
+    idx = InvertedIndex()
+    idx.load()
+    return idx.get_bm25_idf(term)
+
+def bm25_tf_command(doc_id,term,k1):
+    idx = InvertedIndex()
+    idx.load()
+    return idx.get_bm25_tf(doc_id,term,k1)
 
 def build_command() -> None:
     idx = InvertedIndex()
