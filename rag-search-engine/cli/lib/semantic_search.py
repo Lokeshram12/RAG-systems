@@ -5,6 +5,7 @@ import json
 from .search_utils import (
     load_movies,
 )
+import re
 
 class SemanticSearch:
 
@@ -107,6 +108,99 @@ class SemanticSearch:
 
         return top_results
 
+
+class ChunkedSemanticSearch(SemanticSearch):
+
+    def __init__(self, model_name="all-MiniLM-L6-v2") -> None:
+        super().__init__()
+        self.chunk_embeddings = None
+        self.chunk_metadata = None
+
+    def build_chunk_embeddings(self, documents):
+        """
+        Build chunk embeddings from scratch and save them to disk.
+        """
+
+        self.documents = documents
+        self.document_map = {doc["id"]: doc for doc in documents}
+
+        all_chunks = []
+        chunk_metadata = []
+
+        for movie_idx, doc in enumerate(self.documents):
+            description = doc.get("description", "")
+
+            if not description.strip():
+                continue
+
+            chunks = semantic_chunk_text(
+                description,
+                max_chunk_size=4,
+                overlap=1
+            )
+
+            total_chunks = len(chunks)
+
+            for chunk_idx, chunk in enumerate(chunks):
+                all_chunks.append(chunk)
+
+                chunk_metadata.append({
+                    "movie_idx": movie_idx,
+                    "chunk_idx": chunk_idx,
+                    "total_chunks": total_chunks,
+                })
+
+        print("Building chunk embeddings (this may take a while)...")
+
+        self.chunk_embeddings = self.model.encode(
+            all_chunks,
+            show_progress_bar=True
+        )
+
+        self.chunk_metadata = chunk_metadata
+
+        # Save cache
+        os.makedirs("cache", exist_ok=True)
+
+        np.save("cache/chunk_embeddings.npy", self.chunk_embeddings)
+
+        with open("cache/chunk_metadata.json", "w") as f:
+            json.dump(
+                {
+                    "chunks": chunk_metadata,
+                    "total_chunks": len(all_chunks),
+                },
+                f,
+                indent=2
+            )
+
+        return self.chunk_embeddings
+
+    def load_or_create_chunk_embeddings(self, documents):
+        """
+        Load cached chunk embeddings if available.
+        Otherwise rebuild them.
+        """
+
+        self.documents = documents
+        self.document_map = {doc["id"]: doc for doc in documents}
+
+        embeddings_path = "cache/chunk_embeddings.npy"
+        metadata_path = "cache/chunk_metadata.json"
+
+        if os.path.exists(embeddings_path) and os.path.exists(metadata_path):
+            print("Loading chunk embeddings from cache...")
+
+            self.chunk_embeddings = np.load(embeddings_path)
+
+            with open(metadata_path, "r") as f:
+                metadata_json = json.load(f)
+
+            self.chunk_metadata = metadata_json["chunks"]
+
+            return self.chunk_embeddings
+
+        return self.build_chunk_embeddings(documents)
 # ----------------------------
 # Top-Level Functions
 # ----------------------------
@@ -152,3 +246,25 @@ def cosine_similarity(vec1, vec2):
         return 0.0
 
     return dot_product / (norm1 * norm2)
+
+def semantic_chunk_text(text, max_chunk_size=4, overlap=1):
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+
+    if overlap >= max_chunk_size:
+        raise ValueError("overlap must be smaller than max_chunk_size")
+
+    chunks = []
+    step = max_chunk_size - overlap
+
+    for i in range(0, len(sentences), step):
+        chunk_sentences = sentences[i:i + max_chunk_size]
+        if not chunk_sentences:
+            break
+
+        chunk = " ".join(chunk_sentences)
+        chunks.append(chunk)
+
+        if i + max_chunk_size >= len(sentences):
+            break
+
+    return chunks
