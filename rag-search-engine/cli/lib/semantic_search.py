@@ -201,6 +201,74 @@ class ChunkedSemanticSearch(SemanticSearch):
             return self.chunk_embeddings
 
         return self.build_chunk_embeddings(documents)
+
+    def search_chunks(self, query: str, limit: int = 10):
+        """
+        Search using chunk-level embeddings but return best matching movies.
+        """
+
+        if self.chunk_embeddings is None or self.chunk_metadata is None:
+            raise ValueError(
+                "No chunk embeddings loaded. Call `load_or_create_chunk_embeddings` first."
+            )
+
+        if not self.documents:
+            raise ValueError("Documents not loaded.")
+
+        SCORE_PRECISION = 4
+
+        #  Generate query embedding (from SemanticSearch)
+        query_embedding = self.generate_embedding(query)
+
+        #  Populate chunk score list
+        chunk_scores = []
+
+        for idx, chunk_embedding in enumerate(self.chunk_embeddings):
+            score = cosine_similarity(query_embedding, chunk_embedding)
+
+            metadata = self.chunk_metadata[idx]
+
+            chunk_scores.append({
+                "chunk_idx": metadata["chunk_idx"],
+                "movie_idx": metadata["movie_idx"],
+                "score": score,
+            })
+
+        #  Aggregate best chunk score per movie
+        movie_scores = {}
+
+        for chunk in chunk_scores:
+            movie_idx = chunk["movie_idx"]
+            score = chunk["score"]
+
+            if movie_idx not in movie_scores or score > movie_scores[movie_idx]:
+                movie_scores[movie_idx] = score
+
+        #  Sort movie scores descending
+        sorted_movies = sorted(
+            movie_scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        #  Limit to top N
+        top_movies = sorted_movies[:limit]
+
+        #  Format final results
+        results = []
+
+        for movie_idx, score in top_movies:
+            doc = self.documents[movie_idx]
+
+            results.append({
+                "id": doc.get("id"),
+                "title": doc.get("title"),
+                "document": doc.get("description", "")[:100],
+                "score": round(float(score), SCORE_PRECISION),
+                "metadata": doc.get("metadata", {}),
+            })
+
+        return results
 # ----------------------------
 # Top-Level Functions
 # ----------------------------
@@ -248,7 +316,29 @@ def cosine_similarity(vec1, vec2):
     return dot_product / (norm1 * norm2)
 
 def semantic_chunk_text(text, max_chunk_size=4, overlap=1):
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    # Strip leading/trailing whitespace first
+    text = text.strip()
+
+    # If nothing remains → return empty list
+    if not text:
+        return []
+
+    # Split into sentences using regex
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    # Handle case: single sentence without punctuation
+    if len(sentences) == 1 and not re.search(r"[.!?]$", sentences[0]):
+        sentences = [text]
+
+    # Clean sentences (strip + remove empty ones)
+    cleaned_sentences = []
+    for sentence in sentences:
+        s = sentence.strip()
+        if s:
+            cleaned_sentences.append(s)
+
+    if not cleaned_sentences:
+        return []
 
     if overlap >= max_chunk_size:
         raise ValueError("overlap must be smaller than max_chunk_size")
@@ -256,15 +346,20 @@ def semantic_chunk_text(text, max_chunk_size=4, overlap=1):
     chunks = []
     step = max_chunk_size - overlap
 
-    for i in range(0, len(sentences), step):
-        chunk_sentences = sentences[i:i + max_chunk_size]
+    # Build chunks
+    for i in range(0, len(cleaned_sentences), step):
+        chunk_sentences = cleaned_sentences[i:i + max_chunk_size]
+
         if not chunk_sentences:
             break
 
-        chunk = " ".join(chunk_sentences)
-        chunks.append(chunk)
+        chunk = " ".join(chunk_sentences).strip()
 
-        if i + max_chunk_size >= len(sentences):
+        # Only keep non-empty chunks
+        if chunk:
+            chunks.append(chunk)
+
+        if i + max_chunk_size >= len(cleaned_sentences):
             break
 
     return chunks
