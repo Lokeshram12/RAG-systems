@@ -1,6 +1,6 @@
 from .semantic_search import ChunkedSemanticSearch
 from .keyword_search import InvertedIndex
-
+import os
 class HybridSearch:
     def __init__(self, documents):
         self.documents = documents
@@ -47,13 +47,15 @@ class HybridSearch:
         combined = {}
 
         for result, norm_score in zip(bm25_results, normalized_bm25):
-            doc_id = result.get("id")
+            # BM25 results have structure: {"doc": {...}, "score": ...}
+            doc = result.get("doc", {})
+            doc_id = doc.get("id")
             if not doc_id:
                 continue
             combined[doc_id] = {
                 "id": doc_id,
-                "title": result.get("title"),
-                "description": result.get("description") or result.get("document", ""),
+                "title": doc.get("title"),
+                "description": doc.get("description", ""),
                 "bm25": norm_score,
                 "semantic": 0.0,
             }
@@ -86,4 +88,67 @@ class HybridSearch:
         )
 
         # 7️⃣ Return top `limit` results
+        return sorted_results[:limit]
+
+
+    def rrf_search(self, query: str, limit: int = 5, k: int = 60):
+        expanded_limit = limit * 500
+
+        # 1️⃣ Get results
+        bm25_results = self._bm25_search(query, expanded_limit)
+        semantic_results = self.semantic_search.search_chunks(query, expanded_limit)
+
+        combined = {}
+
+        # 2️⃣ Process BM25 ranks
+        for rank, result in enumerate(bm25_results, start=1):
+            doc = result.get("doc", {})
+            doc_id = doc.get("id")
+            if not doc_id:
+                continue
+
+            rrf_score = 1 / (k + rank)
+
+            if doc_id not in combined:
+                combined[doc_id] = {
+                    "id": doc_id,
+                    "title": doc.get("title"),
+                    "description": doc.get("description", ""),
+                    "bm25_rank": rank,
+                    "semantic_rank": None,
+                    "rrf_score": rrf_score
+                }
+            else:
+                combined[doc_id]["bm25_rank"] = rank
+                combined[doc_id]["rrf_score"] += rrf_score
+
+        # 3️⃣ Process Semantic ranks
+        for rank, result in enumerate(semantic_results, start=1):
+            doc_id = result.get("id")
+            if not doc_id:
+                continue
+
+            rrf_score = 1 / (k + rank)
+
+            if doc_id not in combined:
+                combined[doc_id] = {
+                    "id": doc_id,
+                    "title": result.get("title"),
+                    "description": result.get("description") or result.get("document", ""),
+                    "bm25_rank": None,
+                    "semantic_rank": rank,
+                    "rrf_score": rrf_score
+                }
+            else:
+                combined[doc_id]["semantic_rank"] = rank
+                combined[doc_id]["rrf_score"] += rrf_score
+
+        # 4️⃣ Sort by RRF score
+        sorted_results = sorted(
+            combined.values(),
+            key=lambda x: x["rrf_score"],
+            reverse=True
+        )
+
+        # 5️⃣ Return top results
         return sorted_results[:limit]
